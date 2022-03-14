@@ -1,7 +1,8 @@
+import angr
 from mimetypes import init
 from tracemalloc import start
 
-import angr
+
 import argparse
 from angrutils import plot_cfg, hook0, set_plot_style
 import bingraphvis
@@ -10,8 +11,6 @@ import os
 import subprocess
 import networkx as nx
 from stmtInfo import stmtInfo
-
-
 
 class Info(object):
     def __init__(self):
@@ -33,11 +32,8 @@ class Info(object):
         self.debug = False
         self.curr_asm_ins = None
         
-			
-
 global p
 p = Info()
-
 
 def op_data(operator,d1=None,d2=None,d3=None,d4=None):
 	
@@ -79,7 +75,7 @@ def parse_data(expr,tempVar_map):
 			flag = True
 			val = 0
 			if addr not in p.storeIns :
-				print("Loading addr : " + str(hex(addr)))
+				#print("Loading addr : " + str(hex(addr)))
 				print("at " + hex(p.curr_asm_ins))
 				loading_offset_addr = 0x100000000-int(addr)
 				print("ebp = esp "+str(p.regs[28]))
@@ -109,8 +105,65 @@ def parse_data(expr,tempVar_map):
 	if(p.debug):	
 		print(flag,val)
 	return (flag,val)
-  	
+	
+def parse_stmts(stmt,tempVar_map):
 
+	if(p.debug):
+		print(stmt)	          
+	if stmt.tag == 'Ist_IMark' :
+		p.curr_asm_ins = stmt.addr        
+	if stmt.tag == 'Ist_Put' :
+		flag,data = parse_data(stmt.data,tempVar_map)
+		#print(flag,data)
+		if flag and data != None :
+			p.regs[stmt.offset] = data
+		# if stmt.offset == 28 :
+		# 	p.regs[28] = 0
+		# else :
+		# 	p.regs[stmt.offset] = data
+	if stmt.tag == 'Ist_WrTmp':
+		flag,data = parse_data(stmt.data,tempVar_map)
+		#print(flag,data)
+		if flag and data != None :
+			tempVar_map[stmt.tmp] = data
+
+	if stmt.tag == 'Ist_Store' :
+		flag,addr = parse_data(stmt.addr,tempVar_map)
+		flag1,data = parse_data(stmt.data,tempVar_map)
+
+		if flag :
+			#print("storing addr : " + str(hex(addr)))
+			p.storeIns.append(addr)
+	if(p.debug) : 	
+		print(tempVar_map)
+		print(p.regs)
+		print(p.storeIns)
+		print('\n\n')    	
+
+
+def BFS(nodes):
+	
+	nodes_list = list(nodes)
+	vis_map = []
+	
+	for i in range(len(nodes)):
+		node = nodes_list[i]
+
+		vis_map[node.addr] = False
+	
+	queue = []
+	
+	queue.append(nodes_list[0])
+	vis_map[nodes_list[0].addr] = True
+	
+	while queue :
+		s = queue.pop(0)
+		
+		#for i in 
+		
+	
+	
+  	
 def build_CFG():
 
     main_addr = p.project.loader.main_object.get_symbol('main').rebased_addr
@@ -122,77 +175,60 @@ def build_CFG():
     p.regs[p.ebp]=0
     #p.regs[p.ebp]=0
     nodes_list = list(nodes)
-    for i in range(len(nodes)) :
-        node = nodes_list[i]
-        try:
-            stmts = node.block.vex.statements
-        except:
-            stmts = []
-        
-        tempVar_map = dict()
-        
-        p.curr_asm_ins = None
-       
-        for stmt in stmts :
-          #print(stmt.tag)
-          stmtinfo = stmtInfo(stmt)
-          #print(stmtinfo)
-         
-          if(p.debug):
-	          print(stmt)
-          
-          if(p.debug):
-	          print(stmt.tag)
-	          
-          if stmt.tag == 'Ist_IMark' :
-            p.curr_asm_ins = stmt.addr        
-          if stmt.tag == 'Ist_Put' :
-            flag,data = parse_data(stmt.data,tempVar_map)
-            #print(flag,data)
-            if flag and data != None :
-              p.regs[stmt.offset] = data
-            	# if stmt.offset == 28 :
-            	# 	p.regs[28] = 0
-            	# else :
-	            # 	p.regs[stmt.offset] = data
-       
-          if stmt.tag == 'Ist_WrTmp':
-            flag,data = parse_data(stmt.data,tempVar_map)
-            #print(flag,data)
-            if flag and data != None :
-            	tempVar_map[stmt.tmp] = data
-          
-          if stmt.tag == 'Ist_Store' :
-            flag,addr = parse_data(stmt.addr,tempVar_map)
-            flag1,data = parse_data(stmt.data,tempVar_map)
-            
-            if flag :
-            	    print("storing addr : " + str(hex(addr)))
-            	    p.storeIns.append(addr)
-          if(p.debug) : 	
-	          print(tempVar_map)
-          if(p.debug):
-        	  print(p.regs)
-          if(p.debug):
-        	  print(p.storeIns)
-          if(p.debug):
-	          print('\n\n')    	
-						
-						
+    
 
 
-					
-				
+
+    #BFS(nodes)
     
-    
+    # for i in range(len(nodes)) :
+    #     node = nodes_list[i]
+    #     #print(hex(node.addr))
+    #     try:
+    #         stmts = node.block.vex.statements
+    #     except:
+    #         stmts = []
+        
+    #     tempVar_map = dict()
+        
+    #     p.curr_asm_ins = None
+    #     #continue
+    #     for stmt in stmts :
+    #     	parse_stmts(stmt,tempVar_map)
+
+def debug_func(state):
+	print("State is about to do a memory write!")
+
+def exe_sim():
+	
+	main_addr = p.project.loader.main_object.get_symbol('main').rebased_addr
+	state = p.project.factory.blank_state(addr = main_addr)
+	print(hex(state.addr))
+	
+
+	#state.inspect.b('mem_write', when=angr.BP_AFTER, action=debug_func)
+
+
+	sm = p.project.factory.simgr(state)
+
+	#state.block.pp()
+
+	
+	print(state.step())
+	#	state = sm.deadended[0]
+	print(state.regs.ebp)
+	#print(state.mem[state.regs.ebp].int)
+
 
 
 	
+	return 
 
 
+
+			
 def disassemble():
 	p.binaryfile = os.path.realpath(p.args.input)
-
 	# generate objdump file
 	p.asmfile = p.binaryfile + "_asm"
 	#print(info.asmfile)
@@ -222,15 +258,16 @@ def load_binary():
 		p.picflag = 0
 
 	try:
-		p.project = angr.Project(p.args.input,load_options={'auto_load_libs': False})
+		p.project = angr.Project(p.args.input,load_options={'auto_load_libs': False},arch = 'VexX86')
 	except:
 		p.picflag = 0
 		p.project = angr.Project(p.args.input, 
 			main_opts = {'backend': 'blob'},
-			load_options={'auto_load_libs': False})
+			load_options={'auto_load_libs': False},arch = 'VexX86')
     
 
 parse_parameters()
 load_binary()
 disassemble()
 build_CFG()
+exe_sim()
