@@ -38,6 +38,7 @@ class Info(object):
         self.ebp = 28
         self.debug = False
         self.ebp_stack = list()
+        self.backedge_in = set()
         self.curr_func = 0
         self.curr_asm_ins = None
         self.storeInsns_map = dict()
@@ -303,15 +304,13 @@ def BFS(nodes_list):
 def Topo(nodes_list):
 	
 
-	next_nodes = [nodes_list[0]]
 
 	#p.curr_func=next_nodes[0].function_address
 	in_degree = dict()
-	vis_map = dict()
+	visited = set()
 
 	for i in nodes_list : 
 	
-		vis_map[i.block_id] = []
 		# print(hex(i.addr))
 		# print(len(i.predecessors))
 		# for temp in i.predecessors :
@@ -328,6 +327,8 @@ def Topo(nodes_list):
 	p.bb_info[nodes_list[0].block_id]['regs'][p.ebp]={0}
 	p.bb_info[nodes_list[0].block_id]['regs'][p.esp]={0}
 
+
+	next_nodes = [nodes_list[0]]
 	for blockId in in_degree :
 		if in_degree[blockId] == 0:
 			for node in nodes_list:
@@ -335,9 +336,28 @@ def Topo(nodes_list):
 					next_nodes.append(node)
 					break
 
+	# try:
+	# 	cycles = list(nx.simple_cycles(p.cfg.graph))
+	# except:
+	# 	cycles = []
+
+	# print(cycles)
+
+	# for i in range(len(cycles)):
+	# 	c = cycles[i]
+	# 	minNode = c[0]
+	# 	for n in c:
+	# 		if minNode.addr > n.addr:
+	# 			minNode = n
+	# 	p.backedge_in.add(minNode.block_id)
+
+	# print(p.backedge_in)
+	# print("\n")
+
 	while next_nodes :
 
 		node = next_nodes.pop(0)
+		# visited.add(node.block_id)
 		#p.curr_func = node.function_address
 		#print("initial",in_degree)
 		#print(node.function_address)
@@ -345,6 +365,7 @@ def Topo(nodes_list):
 		if len(node.predecessors) > 0 : 
 			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[0].block_id].copy()
 
+			# print(hex(node.addr), "no..........." , len(node.predecessors))
 			for pre in node.predecessors:
 				# print("\n 1 --------")
 				# print(p.storeInsns_map[node.addr])
@@ -387,10 +408,21 @@ def Topo(nodes_list):
 		# 		x[1] -= 1
 		# 		if x[1] == 0:
 		# 			next_nodes.append(x[0])
+		# print(node.addr)
 		for suc in node.successors : 
 			in_degree[suc.block_id] -= 1
-			if in_degree[suc.block_id] == 0:
+			# print(in_degree[suc.block_id])
+			if in_degree[suc.block_id] == 0 :
 				next_nodes.append(suc)
+			# if in_degree[suc.block_id] == 0 and (suc.block_id) not in visited:
+			# 	next_nodes.append(suc)
+			# if in_degree[suc.block_id] == 1:
+			# 	count = 0
+			# 	for pre in node.predecessors:
+			# 		if pre.block_id  not in visited:
+			# 			count += 1
+			# 	if count == 1:
+			# 		next_nodes.append(suc)
 
 	return
 
@@ -399,6 +431,7 @@ def Topo(nodes_list):
 def build_CFG():
 
     main_addr = p.project.loader.main_object.get_symbol('main').rebased_addr
+    #p.cfg = p.project.analyses.CFGEmulated(starts=[main_addr],initial_state = p.project.factory.blank_state())
     p.cfg = p.project.analyses.CFGEmulated(starts=[main_addr],initial_state = p.project.factory.blank_state(),normalize=True,fail_fast=True,keep_state=True,context_sensitivity_level=2)
     #p.cfg = p.project.analyses.CFGFast()
     plot_cfg(p.cfg, "example_cfg_asm", asminst=True, vexinst=False, debug_info=False, remove_imports=True, remove_path_terminator=True)
@@ -478,3 +511,18 @@ load_binary()
 disassemble()
 build_CFG()
 Topo(p.nodes_list)
+
+
+
+
+# for n in p.nodes_list:
+# 	print(hex(n.addr))
+# 	print("pred.......")
+# 	for pp in n.predecessors:
+# 		print(hex(pp.addr))
+# 	print("succ.......")
+# 	for s in n.successors:
+# 		print(hex(s.addr))
+# 	print('adj,,,,,,,,,,')
+# 	print(p.cfg.graph.adj[n])
+# 	print('\n')
