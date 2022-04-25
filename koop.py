@@ -28,6 +28,7 @@ class Info(object):
         self.tempVar = dict()
 
         self.bb_info = dict()
+        self.bb_info_new = dict()        
         
         self.regs = dict()
         self.mem = dict()
@@ -39,6 +40,7 @@ class Info(object):
         self.debug = False
         self.ebp_stack = list()
         self.backedge_in = set()
+        self.isChanged = True
         self.curr_func = 0
         self.curr_asm_ins = None
         self.storeInsns_map = dict()
@@ -90,11 +92,11 @@ def parse_data(expr, blockAddr, tempVar_map):
 			for addr in addr_set:
 				if (addr) not in p.storeInsns_map[blockAddr] :
 					#print("Loading addr : " + str(hex(addr)))
-					print("at " + hex(p.curr_asm_ins))
 					if(int(addr)==0):
 						return (flag1,val)
 					else :
 						loading_offset_addr = 0x100000000-int(addr)
+					print("at " + hex(p.curr_asm_ins))
 					print("ebp = esp "+str(p.bb_info[blockAddr]['regs'][28]))
 					print("Use of Uninitialized Mem loc at esp - " + str(hex(loading_offset_addr)))
 				else :
@@ -264,43 +266,6 @@ def parse_stmts(stmt, blockAddr, tempVar_map):
 	return storeIns   	
 
 
-def BFS(nodes_list):
-	
-	queue = []
-	queue.append(nodes_list[0])
-	
-	while len(queue) :
-		sz = len(queue)
-		print(sz, "...........")
-		storeInsns = set()
-		while sz:
-			node = queue.pop(0)
-			for s in node.successors:
-				queue.append(s)
-
-			try:
-				stmts = node.block.vex.statements
-			except:
-				stmts = []
-
-			tempVar_map = dict()
-			p.curr_asm_ins = None
-			storeInsn = set()
-			for stmt in stmts :
-				l = parse_stmts(stmt,tempVar_map)
-				for i in l:
-					storeInsn.add(i)
-
-			if len(storeInsns) == 0:
-				for i in storeInsn:
-					storeInsns.add(i)
-			else:
-				storeInsns = storeInsns.intersection(storeInsn)
-
-			sz -= 1
-		p.storeIns.update(storeInsns)
-		#print(p.storeIns)
-
 def Topo(nodes_list):
 	
 
@@ -329,48 +294,37 @@ def Topo(nodes_list):
 
 
 	next_nodes = [nodes_list[0]]
-	for blockId in in_degree :
-		if in_degree[blockId] == 0:
-			for node in nodes_list:
-				if node.block_id == blockId :
-					next_nodes.append(node)
-					break
+	# for blockId in in_degree :
+	# 	if in_degree[blockId] == 0:
+	# 		for node in nodes_list:
+	# 			if node.block_id == blockId :
+	# 				next_nodes.append(node)
+	# 				break
 
-	# try:
-	# 	cycles = list(nx.simple_cycles(p.cfg.graph))
-	# except:
-	# 	cycles = []
+	try:
+		cycles = list(nx.simple_cycles(p.cfg.graph))
+	except:
+		cycles = []
 
 	# print(cycles)
-
-	# for i in range(len(cycles)):
-	# 	c = cycles[i]
-	# 	minNode = c[0]
-	# 	for n in c:
-	# 		if minNode.addr > n.addr:
-	# 			minNode = n
-	# 	p.backedge_in.add(minNode.block_id)
-
-	# print(p.backedge_in)
-	# print("\n")
 
 	while next_nodes :
 
 		node = next_nodes.pop(0)
-		# visited.add(node.block_id)
-		#p.curr_func = node.function_address
-		#print("initial",in_degree)
-		#print(node.function_address)
+
+		print("visiting node - ",hex(node.addr))
+		visited.add(node.block_id)
 
 		if len(node.predecessors) > 0 : 
-			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[0].block_id].copy()
 
-			# print(hex(node.addr), "no..........." , len(node.predecessors))
-			for pre in node.predecessors:
-				# print("\n 1 --------")
-				# print(p.storeInsns_map[node.addr])
-				# print("\n 2 --------")
-				# print(p.storeInsns_map[pre.addr])
+			i = 0
+			while i < len(node.predecessors) and node.predecessors[i].block_id not in visited:
+				i += 1
+			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[i].block_id].copy()
+
+			for pre in node.predecessors[i:]:
+				if pre.block_id not in visited:
+					continue
 				p.storeInsns_map[node.block_id] = p.storeInsns_map[node.block_id].intersection(p.storeInsns_map[pre.block_id])
 				for r in p.bb_info[pre.block_id]['regs']:
 					if r not in p.bb_info[node.block_id]['regs']:
@@ -403,28 +357,84 @@ def Topo(nodes_list):
 			# print("final ----")
 			# print(p.storeInsns_map[node.addr])
 
-		# for x in in_degree:
-		# 	if x[0] in node.successors:
-		# 		x[1] -= 1
-		# 		if x[1] == 0:
-		# 			next_nodes.append(x[0])
-		# print(node.addr)
 		for suc in node.successors : 
+			if suc in visited :
+				continue
 			in_degree[suc.block_id] -= 1
-			# print(in_degree[suc.block_id])
+
+			for suc_pre in suc.predecessors :
+				if suc_pre.block_id in visited:
+					continue
+
+				flag = False
+				for c in cycles :
+					if suc in c and suc_pre in c :
+						flag = True
+						break
+				if flag == True :
+					in_degree[suc.block_id] -= 1
+
 			if in_degree[suc.block_id] == 0 :
 				next_nodes.append(suc)
-			# if in_degree[suc.block_id] == 0 and (suc.block_id) not in visited:
-			# 	next_nodes.append(suc)
-			# if in_degree[suc.block_id] == 1:
-			# 	count = 0
-			# 	for pre in node.predecessors:
-			# 		if pre.block_id  not in visited:
-			# 			count += 1
-			# 	if count == 1:
-			# 		next_nodes.append(suc)
+
 
 	return
+
+
+
+def traverseGraph(nodes_list):
+
+	# p.isChanged = True
+
+	# for i in nodes_list : 
+	
+	# 	# print(hex(i.addr))
+	# 	# print(len(i.predecessors))
+	# 	# for temp in i.predecessors :
+	# 	# 	print(temp)
+	# 	# print("\n")
+	# 	#in_degree.append((i.block_id,len(i.predecessors)))
+	# 	p.storeInsns_map[i.block_id] = set()
+	# 	p.bb_info[i.block_id] = dict()
+	# 	p.bb_info[i.block_id]['regs'] = dict()
+	# 	p.bb_info[i.block_id]['mem'] = dict()
+
+	# p.bb_info[nodes_list[0].block_id]['regs'][p.ebp]={0}
+	# p.bb_info[nodes_list[0].block_id]['regs'][p.esp]={0}
+
+	# p.bb_info_new = p.bb_info.copy()
+
+	# while(p.isChanged):
+
+	# 	for node in nodes_list :
+
+
+	# 		if len(node.predecessors) > 0 : 
+	# 			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[0].block_id].copy()
+
+	# 			# print(hex(node.addr), "no..........." , len(node.predecessors))
+	# 			for pre in node.predecessors:
+	# 				# print("\n 1 --------")
+	# 				# print(p.storeInsns_map[node.addr])
+	# 				# print("\n 2 --------")
+	# 				# print(p.storeInsns_map[pre.addr])
+	# 				p.storeInsns_map[node.block_id] = p.storeInsns_map[node.block_id].intersection(p.storeInsns_map[pre.block_id])
+	# 				for r in p.bb_info[pre.block_id]['regs']:
+	# 					if r not in p.bb_info[node.block_id]['regs']:
+	# 						p.bb_info[node.block_id]['regs'][r]=set()
+	# 					p.bb_info[node.block_id]['regs'][r]=p.bb_info[node.block_id]['regs'][r].union(p.bb_info[pre.block_id]['regs'][r])
+
+	# 				for m in p.bb_info[pre.block_id]['mem']:
+	# 					if m not in p.bb_info[node.block_id]['mem']:
+	# 						p.bb_info[node.block_id]['mem'][m]=set()
+	# 					p.bb_info[node.block_id]['mem'][m]=p.bb_info[node.block_id]['mem'][m].union(p.bb_info[pre.block_id]['mem'][m])
+		
+
+
+
+
+
+	return 
 
 
 	
@@ -436,34 +446,7 @@ def build_CFG():
     #p.cfg = p.project.analyses.CFGFast()
     plot_cfg(p.cfg, "example_cfg_asm", asminst=True, vexinst=False, debug_info=False, remove_imports=True, remove_path_terminator=True)
     plot_cfg(p.cfg, "example_cfg_vex", asminst=False, vexinst=True, debug_info=False, remove_imports=True, remove_path_terminator=True)
-    nodes = p.cfg.graph.nodes
-
-    # p.regs[p.esp]=0
-    # p.regs[p.ebp]=0
-
-    #p.regs[p.ebp]=0
-    p.nodes_list = list(nodes)
-    # for i in p.nodes_list :
-    #     print(i.addr,i.block_id)
-    # print(type(p.nodes_list[0]))
-
-
-
-    
-    # for i in range(len(nodes)) :
-    #     node = nodes_list[i]
-    #     #print(hex(node.addr))
-    #     try:
-    #         stmts = node.block.vex.statements
-    #     except:
-    #         stmts = []
-        
-    #     tempVar_map = dict()
-        
-    #     p.curr_asm_ins = None
-    #     #continue
-    #     for stmt in stmts :
-    #     	parse_stmts(stmt,tempVar_map)
+    p.nodes_list = list(p.cfg.graph.nodes)
           						
 			
 def disassemble():
@@ -514,15 +497,6 @@ Topo(p.nodes_list)
 
 
 
-
+# print(type(p.nodes_list[0]))
 # for n in p.nodes_list:
-# 	print(hex(n.addr))
-# 	print("pred.......")
-# 	for pp in n.predecessors:
-# 		print(hex(pp.addr))
-# 	print("succ.......")
-# 	for s in n.successors:
-# 		print(hex(s.addr))
-# 	print('adj,,,,,,,,,,')
-# 	print(p.cfg.graph.adj[n])
-# 	print('\n')
+# 	print(hex(n.addr), n.syscall_name)
