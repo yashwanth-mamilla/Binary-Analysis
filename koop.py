@@ -269,6 +269,7 @@ def parse_stmts(stmt, blockAddr, tempVar_map):
 def Topo(nodes_list):
 	
 
+	back_edges = angr.utils.graph.dfs_back_edges(p.cfg.graph, p.nodes_list[0])
 
 	#p.curr_func=next_nodes[0].function_address
 	in_degree = dict()
@@ -307,12 +308,17 @@ def Topo(nodes_list):
 		cycles = []
 
 	# print(cycles)
+	for be in back_edges:
+		in_degree[be[1].block_id] -= 1
+	
+	# for n in p.nodes_list:
+	# 	print(hex(n.addr), ":  ", in_degree[n.block_id])
 
 	while next_nodes :
 
 		node = next_nodes.pop(0)
 
-		print("visiting node - ",hex(node.addr))
+		# print("visiting node - ",hex(node.addr))
 		visited.add(node.block_id)
 
 		if len(node.predecessors) > 0 : 
@@ -358,24 +364,26 @@ def Topo(nodes_list):
 			# print(p.storeInsns_map[node.addr])
 
 		for suc in node.successors : 
+			# print("suc...", hex(suc.addr), in_degree[suc.block_id])
 			if suc in visited :
 				continue
 			in_degree[suc.block_id] -= 1
-
-			for suc_pre in suc.predecessors :
-				if suc_pre.block_id in visited:
-					continue
-
-				flag = False
-				for c in cycles :
-					if suc in c and suc_pre in c :
-						flag = True
-						break
-				if flag == True :
-					in_degree[suc.block_id] -= 1
+			# print("suc...", hex(suc.addr), in_degree[suc.block_id])
+			# for suc_pre in suc.predecessors :
+			# 	flag = False
+			# 	for c in cycles :
+			# 		if suc in c and suc_pre in c :
+			# 			flag = True
+			# 			break
+			# 	if flag == True :
+			# 		in_degree[suc.block_id] -= 1
+				
+				# if (suc_pre.block_id, suc.block_id)
 
 			if in_degree[suc.block_id] == 0 :
 				next_nodes.append(suc)
+
+		
 
 
 	return
@@ -496,7 +504,13 @@ build_CFG()
 Topo(p.nodes_list)
 
 
-
+# gf = angr.analyses.forward_analysis.visitors.graph.GraphVisitor()
+# print(p.cfg.get_loop_backedges())
 # print(type(p.nodes_list[0]))
 # for n in p.nodes_list:
-# 	print(hex(n.addr), n.syscall_name)
+# 	print((n.block_id),n.back_edges() )
+
+# cfg1 = angr.analyses.cfg.cfg_base.CFGBase(sort='fast', context_sensitivity_level=2, binary='example').model
+
+# for i in edges :
+# 	print(i)
