@@ -79,9 +79,9 @@ def parse_data(expr, blockAddr, tempVar_map):
 			flag = True 
 			val = p.bb_info[blockAddr]['regs'][expr.offset]
 			#p.regs[expr.offset] 
-		else :
-			print("at " + hex(p.curr_asm_ins))
-			print("loading from uninitialized register")	
+		# else :
+		# 	print("at " + hex(p.curr_asm_ins))
+		# 	print("loading from uninitialized register")	
 	if expr.tag == 'Iex_Load' :
 		flag1,addr_set = parse_data(expr.addr, blockAddr, tempVar_map)	
 		if flag1 :
@@ -311,8 +311,8 @@ def Topo(nodes_list):
 	for be in back_edges:
 		in_degree[be[1].block_id] -= 1
 	
-	# for n in p.nodes_list:
-	# 	print(hex(n.addr), ":  ", in_degree[n.block_id])
+	# for n in p.nodes_li
+	# r), ":  ", in_degree[n.block_id])
 
 	while next_nodes :
 
@@ -476,7 +476,7 @@ def disassemble():
 def parse_parameters():
 	parser = argparse.ArgumentParser(description='SelectiveTaint static analysis')
 	parser.add_argument("-input", help = "input enclave binary file", type=str, required=True)
-	parser.add_argument("-debug", help = "to debug file", type=str, required=True)
+	#parser.add_argument("-debug", help = "to debug file", type=str, required=True)
 	p.args = parser.parse_args()
 
 def load_binary():
