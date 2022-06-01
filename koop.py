@@ -44,6 +44,8 @@ class Info(object):
         self.curr_func = 0
         self.curr_asm_ins = None
         self.storeInsns_map = dict()
+        self.tempStore_map = dict()
+        self.ans = list()
 
 global p
 p = Info()
@@ -53,22 +55,34 @@ def op_data(operator,d1=None,d2=None,d3=None,d4=None):
 	if(operator == 'Iop_Add32'):
 		return d1 + d2
 
+def padhexa(s):
+    return '0x' + s[2:].zfill(8)
+
 def check(flag1,flag2):
 	if flag1 and flag2 :
 		return True
 	else:
 		return False
 		
-def parse_data(expr, blockAddr, tempVar_map):
+def parse_data(expr, node, tempVar_map):
 
+	blockAddr = node.block_id
+	functionAddr = node.function_address
 	flag = False
 	val = set()
-	
+
 	#print(expr.tag,expr)
 	if expr.tag == "Iex_Const" :
 		flag=True
-		
-		val.add(expr.con.value)
+		value = expr.con.value
+		value_hex = padhexa(hex(value))
+		#print("value " + hex(value))
+		if ('0xf' in value_hex or'0xe' in value_hex or'0xd' in value_hex  or '0xc' in value_hex 
+			or '0xb' in value_hex or '0xa' in value_hex or '0x9' in value_hex or '0x8' in value_hex):
+			value = -(0x100000000-int(value))
+			#print("value " + hex(value))
+			#print(value)
+		val.add(value)
 			
 	if expr.tag == 'Iex_RdTmp' :
 		if expr.tmp in tempVar_map :
@@ -83,7 +97,13 @@ def parse_data(expr, blockAddr, tempVar_map):
 		# 	print("at " + hex(p.curr_asm_ins))
 		# 	print("loading from uninitialized register")	
 	if expr.tag == 'Iex_Load' :
-		flag1,addr_set = parse_data(expr.addr, blockAddr, tempVar_map)	
+		
+		
+		flag1,addr_set = parse_data(expr.addr, node, tempVar_map)
+
+		if( '__x86.get_pc_thunk' in node.name):
+			return flag1,addr_set
+		
 		if flag1 :
 			flag = True
 			# print("\nIN LOAD :")
@@ -94,20 +114,45 @@ def parse_data(expr, blockAddr, tempVar_map):
 					#print("Loading addr : " + str(hex(addr)))
 					if(int(addr)==0):
 						return (flag1,val)
-					else :
-						loading_offset_addr = 0x100000000-int(addr)
-					print("at " + hex(p.curr_asm_ins))
-					print("ebp = esp "+str(p.bb_info[blockAddr]['regs'][28]))
-					print("Use of Uninitialized Mem loc at esp - " + str(hex(loading_offset_addr)))
+					
+
+					#else :
+					if(p.debug):
+						print("Load Failed")
+						print(addr)
+							#loading_offset_addr = 0x100000000-int(addr)
+						print("at - "+hex(p.curr_asm_ins))
+						print(p.bb_info[blockAddr]['regs'][28],p.bb_info[blockAddr]['regs'][24])
+					#print(loading_offset_addr)
+					#if(loading_offset_addr < 0x100000000):
+
+					if (node.name,p.curr_asm_ins,p.bb_info[blockAddr]['regs'],addr) not in p.ans :
+				
+						p.ans.append((node.name,p.curr_asm_ins,p.bb_info[blockAddr]['regs'].copy(),addr))
+
+						# print("\nIn function "+node.name)
+						# print("at " + hex(p.curr_asm_ins))
+						# print("ebp = esp "+str(p.bb_info[blockAddr]['regs'][28]))
+						# print("Use of Uninitialized Mem loc at esp - " + str(hex(loading_offset_addr)))
 				else :
 					val=(p.bb_info[blockAddr]['mem'][addr])
 							
 		
 	if expr.tag == 'Iex_Binop' :
-		flag1,data1 = parse_data(expr.args[0], blockAddr, tempVar_map)
-		flag2,data2 = parse_data(expr.args[1], blockAddr, tempVar_map)
+		flag1,data1 = parse_data(expr.args[0], node, tempVar_map)
+		flag2,data2 = parse_data(expr.args[1], node, tempVar_map)
 		op = expr.op
 		#print(op)
+		# print("adasdad")
+		# print(data1)
+		# print(data2)
+		# temp_data1 = set()
+		# for d1 in data1:
+		# 	s = hex(d1)
+		# 	if s[0] == f or :
+		# 		temp_data1.add(0x100000000-d1)
+		# 	else:
+
 		if(op == 'Iop_Add32' and check(flag1,flag2) ):
 			flag = True
 			
@@ -130,6 +175,8 @@ def parse_data(expr, blockAddr, tempVar_map):
 
 			for d1 in data1 :
 				for d2 in data2:
+					#print(d1,hex(d2))
+
 					val.add(d1&d2)
 			#val = data1 & data2
 		if(op =='Iop_CmpEQ32' and check(flag1,flag2)) :
@@ -180,7 +227,7 @@ def parse_data(expr, blockAddr, tempVar_map):
 			#val = data1 < data2
 		#print(op)
 	if expr.tag == 'Iex_Unop' :
-		flag1,data1 = parse_data(expr.args[0], blockAddr, tempVar_map)
+		flag1,data1 = parse_data(expr.args[0], node, tempVar_map)
 		op = expr.op
 		if(op == 'Iop_1Uto32' and flag1):	
 			val = data1
@@ -194,60 +241,57 @@ def parse_data(expr, blockAddr, tempVar_map):
 		print(flag,val)
 	return (flag,val)
 	
-def parse_stmts(stmt, blockAddr, tempVar_map):
+def parse_stmts(stmt, node, tempVar_map):
 
+	blockAddr = node.block_id
+	
 	if(p.debug):
 		print(stmt.tag,stmt)
-	storeIns = p.storeInsns_map[blockAddr]        
+	
+	# if node.function_address not in p.storeInsns_map[node.block_id]:
+	# 	p.storeInsns_map[node.block_id] = set()
+	#storeIns = p.storeInsns_map[blockAddr]     
+	storeIns = set()
 	if stmt.tag == 'Ist_IMark' :
 		p.curr_asm_ins = stmt.addr        
 	if stmt.tag == 'Ist_Put' :
-		flag,data = parse_data(stmt.data, blockAddr, tempVar_map)
+		flag,data = parse_data(stmt.data, node , tempVar_map)
 		#print(flag,data)
+		
 		if flag and data != None :
 			if stmt.offset not in p.bb_info[blockAddr]['regs'] :
 				p.bb_info[blockAddr]['regs'][stmt.offset] = set()
 
 			p.bb_info[blockAddr]['regs'][stmt.offset]=data
-			# if stmt.offset == 28 :
 
-			# 	curr_node = None
-			# 	for node in p.nodes_list:
-			# 		if node.block_id == blockAddr :
-			# 			curr_node = node
-			# 			break
-			# 	print(blockAddr)
-			# 	print(hex(p.curr_asm_ins))
-			# 	print(curr_node.function_address, p.curr_func)
-			# 	print(p.ebp_stack)
-			# 	if curr_node.function_address == p.curr_func :
-					
-			# 		if p.ebp_stack != []:
-			# 			val = p.ebp_stack.pop(-1)
-			# 			p.bb_info[blockAddr]['regs'][stmt.offset]=val
-			# 	else :
-			# 		p.ebp_stack.append(p.bb_info[blockAddr]['regs'][stmt.offset])
-			# 		p.curr_func = curr_node.function_address
-			# 	print(p.ebp_stack)
-	
-			#p.regs[stmt.offset] = data
-		
-		# else :
-		# 	p.regs[stmt.offset] = data
+			if(stmt.offset==28):
+				ss1 = 0
+				for ss in p.bb_info[blockAddr]['regs'][28]:
+					ss1 = ss+4
+				storeIns.add(ss1)
+				p.bb_info[blockAddr]['mem'][ss1]={0}
+
+			# if(stmt.offset==68):
+			# 	print(p.cfg.graph.adj[node])
+
+
+
+			
 	if stmt.tag == 'Ist_WrTmp':
-		flag,data = parse_data(stmt.data, blockAddr, tempVar_map)
+		flag,data = parse_data(stmt.data, node, tempVar_map)
 		#print(flag,data)
 		if flag and data != None :
 			if stmt.tmp not in tempVar_map :
 				tempVar_map[stmt.tmp] = set()	
 			tempVar_map[stmt.tmp]=data
 	if stmt.tag == 'Ist_Store' :
-		flag,addr_set = parse_data(stmt.addr, blockAddr, tempVar_map)
-		flag1,data_set = parse_data(stmt.data, blockAddr, tempVar_map)
+		flag,addr_set = parse_data(stmt.addr, node, tempVar_map)
+		flag1,data_set = parse_data(stmt.data, node, tempVar_map)
 		if flag :
 			#print(str(hex(p.curr_asm_ins))+" storing addr : " + str(hex(addr)))
 			# print("BEFORE ------")
 			# print(storeIns,addr_set)
+			
 			storeIns = storeIns.union(addr_set)
 
 			for addr in addr_set:
@@ -261,16 +305,17 @@ def parse_stmts(stmt, blockAddr, tempVar_map):
 		print(tempVar_map)
 		print(p.bb_info[blockAddr]['regs'])
 		print(p.bb_info[blockAddr]['mem'])
-		print(storeIns)
+		print(p.tempStore_map[blockAddr])
+		print(p.storeInsns_map[blockAddr])
 		print('\n\n') 
 	return storeIns   	
 
 
 def Topo(nodes_list):
 	
-
+	#print("1",flush=True)
 	back_edges = angr.utils.graph.dfs_back_edges(p.cfg.graph, p.nodes_list[0])
-
+	#print("2",flush=True)	
 	#p.curr_func=next_nodes[0].function_address
 	in_degree = dict()
 	visited = set()
@@ -284,7 +329,9 @@ def Topo(nodes_list):
 		# print("\n")
 		#in_degree.append((i.block_id,len(i.predecessors)))
 		in_degree[i.block_id] = len(i.predecessors)
+		#p.storeInsns_map[i.block_id] = set()
 		p.storeInsns_map[i.block_id] = set()
+		p.tempStore_map[i.block_id] = dict()
 		p.bb_info[i.block_id] = dict()
 		p.bb_info[i.block_id]['regs'] = dict()
 		p.bb_info[i.block_id]['mem'] = dict()
@@ -301,23 +348,29 @@ def Topo(nodes_list):
 	# 			if node.block_id == blockId :
 	# 				next_nodes.append(node)
 	# 				break
-
-	try:
-		cycles = list(nx.simple_cycles(p.cfg.graph))
-	except:
-		cycles = []
-
-	# print(cycles)
+	#print("3",flush=True)
 	for be in back_edges:
 		in_degree[be[1].block_id] -= 1
 	
 	# for n in p.nodes_li
 	# r), ":  ", in_degree[n.block_id])
-
+	#print("4",flush=True)
 	while next_nodes :
 
 		node = next_nodes.pop(0)
+		while(node.name==None):
+			node = next_nodes.pop(0)
 
+		#print(node.name,node.function_address,flush=True)
+		#print(p.cfg.graph.adj[node])
+
+		# if('Ijk_Ret' in str(p.cfg.graph.adj[node])):
+		# 	nn = list(p.cfg.graph.adj[node])[0]
+		# 	print(p.cfg.graph.adj[node].get(nn)['jumpkind'],hex(nn.function_address))
+		
+		# if('Ijk_Call' in str(p.cfg.graph.adj[node])):
+		# 	nn = list(p.cfg.graph.adj[node])[0]
+		# 	print(p.cfg.graph.adj[node].get(nn)['jumpkind'])
 		# print("visiting node - ",hex(node.addr))
 		visited.add(node.block_id)
 
@@ -326,12 +379,23 @@ def Topo(nodes_list):
 			i = 0
 			while i < len(node.predecessors) and node.predecessors[i].block_id not in visited:
 				i += 1
+
 			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[i].block_id].copy()
+
+			if(node.function_address == node.predecessors[i].function_address):
+				p.tempStore_map[node.block_id] = p.tempStore_map[node.predecessors[i].block_id].copy()
 
 			for pre in node.predecessors[i:]:
 				if pre.block_id not in visited:
 					continue
+					
 				p.storeInsns_map[node.block_id] = p.storeInsns_map[node.block_id].intersection(p.storeInsns_map[pre.block_id])
+				
+				if(node.function_address == pre.function_address):
+					if(node.function_address not in p.tempStore_map[node.block_id]):
+						p.tempStore_map[node.block_id][node.function_address]=set()	
+					p.tempStore_map[node.block_id][node.function_address]= p.tempStore_map[node.block_id][node.function_address].intersection(p.tempStore_map[pre.block_id][node.function_address])
+
 				for r in p.bb_info[pre.block_id]['regs']:
 					if r not in p.bb_info[node.block_id]['regs']:
 						p.bb_info[node.block_id]['regs'][r]=set()
@@ -354,14 +418,30 @@ def Topo(nodes_list):
 			stmts = []
 
 		tempVar_map = dict()
+		
 		for stmt in stmts :
-			l = parse_stmts(stmt, node.block_id, tempVar_map)
+			
+			l = parse_stmts(stmt, node, tempVar_map)
 			# print("exited ---")
 			# print(l)
 			for i in l :
+				
+				if(node.function_address not in p.tempStore_map[node.block_id]):
+					p.tempStore_map[node.block_id][node.function_address]=set()
+				
+				p.tempStore_map[node.block_id][node.function_address].add(i)
 				p.storeInsns_map[node.block_id].add(i)
 			# print("final ----")
 			# print(p.storeInsns_map[node.addr])
+		
+		if('Ijk_Ret' in str(p.cfg.graph.adj[node])):
+			nn = list(p.cfg.graph.adj[node])[0]
+			#print(p.cfg.graph.adj[node].get(nn)['jumpkind'],hex(nn.function_address))
+			if(node.function_address in p.tempStore_map[node.block_id]):
+				for ss in p.tempStore_map[node.block_id][node.function_address] :
+					if ss in p.storeInsns_map[node.block_id]:
+						p.storeInsns_map[node.block_id].remove(ss)
+
 
 		for suc in node.successors : 
 			# print("suc...", hex(suc.addr), in_degree[suc.block_id])
@@ -387,64 +467,6 @@ def Topo(nodes_list):
 
 
 	return
-
-
-
-def traverseGraph(nodes_list):
-
-	# p.isChanged = True
-
-	# for i in nodes_list : 
-	
-	# 	# print(hex(i.addr))
-	# 	# print(len(i.predecessors))
-	# 	# for temp in i.predecessors :
-	# 	# 	print(temp)
-	# 	# print("\n")
-	# 	#in_degree.append((i.block_id,len(i.predecessors)))
-	# 	p.storeInsns_map[i.block_id] = set()
-	# 	p.bb_info[i.block_id] = dict()
-	# 	p.bb_info[i.block_id]['regs'] = dict()
-	# 	p.bb_info[i.block_id]['mem'] = dict()
-
-	# p.bb_info[nodes_list[0].block_id]['regs'][p.ebp]={0}
-	# p.bb_info[nodes_list[0].block_id]['regs'][p.esp]={0}
-
-	# p.bb_info_new = p.bb_info.copy()
-
-	# while(p.isChanged):
-
-	# 	for node in nodes_list :
-
-
-	# 		if len(node.predecessors) > 0 : 
-	# 			p.storeInsns_map[node.block_id] = p.storeInsns_map[node.predecessors[0].block_id].copy()
-
-	# 			# print(hex(node.addr), "no..........." , len(node.predecessors))
-	# 			for pre in node.predecessors:
-	# 				# print("\n 1 --------")
-	# 				# print(p.storeInsns_map[node.addr])
-	# 				# print("\n 2 --------")
-	# 				# print(p.storeInsns_map[pre.addr])
-	# 				p.storeInsns_map[node.block_id] = p.storeInsns_map[node.block_id].intersection(p.storeInsns_map[pre.block_id])
-	# 				for r in p.bb_info[pre.block_id]['regs']:
-	# 					if r not in p.bb_info[node.block_id]['regs']:
-	# 						p.bb_info[node.block_id]['regs'][r]=set()
-	# 					p.bb_info[node.block_id]['regs'][r]=p.bb_info[node.block_id]['regs'][r].union(p.bb_info[pre.block_id]['regs'][r])
-
-	# 				for m in p.bb_info[pre.block_id]['mem']:
-	# 					if m not in p.bb_info[node.block_id]['mem']:
-	# 						p.bb_info[node.block_id]['mem'][m]=set()
-	# 					p.bb_info[node.block_id]['mem'][m]=p.bb_info[node.block_id]['mem'][m].union(p.bb_info[pre.block_id]['mem'][m])
-		
-
-
-
-
-
-	return 
-
-
 	
 def build_CFG():
 
@@ -502,6 +524,34 @@ load_binary()
 disassemble()
 build_CFG()
 Topo(p.nodes_list)
+
+for (a,b,c,d) in p.ans:
+	#print(a,b,d)
+	# if -d > 0x100000000 :
+	# 	continue
+	if(a==''):
+		continue
+	print("\nIn function "+a)
+	print("at " + hex(b))
+	for ss in c[28]:
+		ebp = ss
+	for ss in c[24]:
+		esp = ss
+		
+	print("ebp = "+str(ebp),"esp = "+str(esp))
+	#d = 0x100000000 + d
+	print("loading addr at " + str(d))
+	val1 = d - ebp
+	val2 = d - esp
+	if(val1>0):
+		print("Use of Uninitialized Mem loc at ebp + "+str(val1)) 
+	else :
+		print("Use of Uninitialized Mem loc at ebp - "+str(-val1)) 
+	if(val2>0):
+		print("or esp + "+str(val2)) 
+	else :
+		print("or esp - "+str(-val2)) 
+	
 
 
 # gf = angr.analyses.forward_analysis.visitors.graph.GraphVisitor()
